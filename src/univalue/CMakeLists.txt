@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.13)
+cmake_minimum_required(VERSION 3.15)
 
 # configure.ac: AC_INIT([univalue], [1.0.4]
 set(VERSION   1.0.4)

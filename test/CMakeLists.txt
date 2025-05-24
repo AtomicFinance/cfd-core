@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.13)
+cmake_minimum_required(VERSION 3.15)
 
 # 絶対パス->相対パス変換
 cmake_policy(SET CMP0076 NEW)
