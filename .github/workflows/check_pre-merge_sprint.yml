@@ -8,23 +8,28 @@ on:
     branches:
     - features/sprint*
 
+# Limit concurrency to prevent job cancellations
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 env:
-  CMAKE_VERSION: 3.15.5
+  CMAKE_VERSION: 3.25.0
 
 jobs:
   cmake-win:
     name: cmake build-win
-    runs-on: windows-2019
+    runs-on: windows-2022
     strategy:
       matrix:
-        generator: ['Visual Studio 16 2019', 'MSYS Makefiles']
+        generator: ['Visual Studio 17 2022', 'MSYS Makefiles']
         shared: [on]
 
     steps:
-    - uses: actions/checkout@v1
+    - uses: actions/checkout@v4
     - name: cmake_version
       run: cmake --version
-    - name: cmake_generage
+    - name: cmake_generate
       run: cmake -S . -B build -G "${{ matrix.generator }}" -DENABLE_SHARED=${{ matrix.shared }} -DENABLE_TESTS=on
     - name: cmake_build
       run: cmake --build build --config Release --parallel 4
@@ -35,17 +40,16 @@ jobs:
 
   cmake-mac:
     name: cmake build-mac
-    runs-on: ${{ matrix.os }}
+    runs-on: self-hosted
     strategy:
       matrix:
-        os: [macos-10.15]
-        # os: [macos-10.15, macos-11.0]
+        runner: [macos]
 
     steps:
-    - uses: actions/checkout@v2
+    - uses: actions/checkout@v4
     - name: cmake_version
       run: cmake --version
-    - name: cmake_generage-macos
+    - name: cmake_generate-macos
       run: cmake -S . -B build -G "Unix Makefiles" -DENABLE_SHARED=on
     - name: cmake_build
       run: cmake --build build --config Release --parallel 4
@@ -57,14 +61,17 @@ jobs:
   cmake-ubuntu-coverage:
     name: cmake build-ubuntu
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
     strategy:
+      # Reduce concurrent jobs to prevent cancellations
+      max-parallel: 2
       matrix:
-        os: [ubuntu-20.04, ubuntu-18.04]
+        os: [ubuntu-22.04]
         shared: [on]
         elements: [on, off]
 
     steps:
-    - uses: actions/checkout@v2
+    - uses: actions/checkout@v4
     - name: dump version
       run: |
         cmake --version
@@ -73,7 +80,7 @@ jobs:
       if: matrix.elements == 'on'
       run: |
         cat /etc/os-release
-        sudo apt install lcov
+        sudo apt-get update && sudo apt-get install -y lcov
     - name: cmake-build
       run: |
         cmake --version
@@ -95,20 +102,20 @@ jobs:
         cd ..
     - name: upload coverage
       if: matrix.elements == 'on'
-      uses: actions/upload-artifact@v1
+      uses: actions/upload-artifact@v4
       with:
         name: output-lcov-cfdcore-${{ matrix.os }}
         path: ./build/lcov_cfdcore_output.zip
 
   cmake-cpp-support-test:
     name: cmake build-ubuntu C++ support test
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-22.04
     strategy:
       matrix:
         cppversion: [11, 14, 17, 20]
 
     steps:
-    - uses: actions/checkout@v2
+    - uses: actions/checkout@v4
     - name: dump version
       run: |
         cmake --version
@@ -129,11 +136,11 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [ubuntu-18.04]
+        os: [ubuntu-22.04]
         shared: [on]
 
     steps:
-    - uses: actions/checkout@v2
+    - uses: actions/checkout@v4
     - name: dump version
       run: |
         cmake --version
@@ -153,19 +160,19 @@ jobs:
          # --valgrind-stacksize=1048576 --num-callers=12
          valgrind -v --tool=memcheck --leak-check=full --valgrind-stacksize=10485760 --log-file=./valgrind.log --time-stamp=yes ./build/Debug/cfdcore_test
     - name: upload coverage
-      uses: actions/upload-artifact@v1
+      uses: actions/upload-artifact@v4
       with:
         name: valgrind-log
         path: ./valgrind.log
 
   doxygen-ubuntu:
     name: doxygen-check
-    runs-on: ubuntu-18.04
+    runs-on: ubuntu-22.04
 
     steps:
-    - uses: actions/checkout@v2
+    - uses: actions/checkout@v4
     - name: install_doxygen
-      run: sudo apt install doxygen graphviz
+      run: sudo apt-get update && sudo apt-get install -y doxygen graphviz
     - name: doxygen_check
       run: |
         cd doc
