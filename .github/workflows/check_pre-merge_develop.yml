@@ -68,15 +68,9 @@ jobs:
       # Reduce concurrent jobs to prevent cancellations
       max-parallel: 3
       matrix:
-        os: [ubuntu-22.04, ubuntu-20.04]
+        os: [ubuntu-22.04]
         shared: [on, off]
         elements: [on, off]
-        exclude:
-          - os: ubuntu-20.04
-            elements: off
-          # Reduce matrix size - focus on most important combinations
-          - os: ubuntu-20.04
-            shared: off
 
     steps:
     - uses: actions/checkout@v4
