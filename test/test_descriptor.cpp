@@ -1059,6 +1059,38 @@ TEST(Descriptor, Parse_Taproot_pubkey) {
     EXPECT_STREQ("Failed to taproot key. taproot is xonly pubkey only.",
         except.what());
   }
+
+#ifndef CFD_DISABLE_ELEMENTS
+  // for elements
+  try {
+    desc = Descriptor::ParseElements(descriptor1);
+  } catch (const CfdException& except) {
+    EXPECT_STREQ(except.what(), "");
+  }
+
+  EXPECT_NO_THROW(script_ref = desc.GetReference());
+  EXPECT_NO_THROW(node = desc.GetNode());
+  EXPECT_TRUE(script_ref.HasKey());
+  EXPECT_TRUE(script_ref.HasAddress());
+  EXPECT_EQ(1, script_ref.GetKeyNum());
+  EXPECT_FALSE(script_ref.HasChild());
+  EXPECT_FALSE(script_ref.HasReqNum());
+  EXPECT_FALSE(script_ref.HasRedeemScript());
+  EXPECT_FALSE(script_ref.HasScriptTree());
+  EXPECT_NO_THROW(locking_script = desc.GetLockingScript());
+  EXPECT_NO_THROW(desc_str = desc.ToString(false));
+  EXPECT_EQ(AddressType::kTaprootAddress, script_ref.GetAddressType());
+  EXPECT_EQ(HashType::kTaproot, script_ref.GetHashType());
+  EXPECT_STREQ(
+      script_ref.GenerateAddress(NetType::kElementsRegtest).GetAddress().c_str(),
+      "ert1p5l62rfvlte3axg3aeu6p0zwnqr60adqc427jkz70sadzxtjdy7tshjlu6s");
+  EXPECT_NO_THROW(pubkey = script_ref.GetKeyList()[0].GetSchnorrPubkey());
+  EXPECT_STREQ(desc_str.c_str(), descriptor1.c_str());
+  EXPECT_STREQ(locking_script.ToString().c_str(),
+      "1 a7f4a1a59f5e63d3223dcf341789d300f4feb418aabd2b0bcf875a232e4d2797");
+  EXPECT_STREQ(pubkey.GetHex().c_str(),
+      pubkey_hex.c_str());
+#endif  // CFD_DISABLE_ELEMENTS
 }
 
 TEST(Descriptor, Parse_Taproot_xpubkey) {
@@ -1400,6 +1432,147 @@ TEST(Descriptor, Parse_Taproot_bip86) {
       "1 a82f29944d65b86ae6b5e5cc75e294ead6c59391a1edc5e016e3498c67fc7bbb");
   EXPECT_EQ(pubkey.GetHex(), pubkey_hex);
   EXPECT_EQ(tree.ToString(), "");
+}
+
+TEST(Descriptor, Parse_bip49) {
+  std::string pubkey_hex = "03a1af804ac108a8a51782198c2d034b28bf90c8803f5a53f76276fa69a4eae77f";
+  std::string ypub = "upub5EFU65HtV5TeiSHmZZm7FUffBGy8UKeqp7vw43jYbvZPpoVsgU93oac7Wk3u6moKegAEWtGNF8DehrnHtv21XXEMYRUocHqguyjknFHYfgY";
+  std::string descriptor1 = "sh(wpkh(" + ypub + "/0/0))";
+  Descriptor desc;
+  Script locking_script;
+  std::string desc_str = "";
+  DescriptorScriptReference script_ref;
+  DescriptorScriptReference child_script_ref;
+  Script redeem_script;
+  Pubkey pubkey;
+  NetType nettype = NetType::kTestnet;
+
+  try {
+    desc = Descriptor::Parse(descriptor1);
+  } catch (const CfdException& except) {
+    EXPECT_STREQ(except.what(), "");
+    return;
+  }
+
+  EXPECT_NO_THROW(script_ref = desc.GetReference());
+  EXPECT_FALSE(script_ref.HasKey());
+  EXPECT_TRUE(script_ref.HasAddress());
+  EXPECT_EQ(0, script_ref.GetKeyNum());
+  EXPECT_TRUE(script_ref.HasChild());
+  EXPECT_FALSE(script_ref.HasReqNum());
+  EXPECT_TRUE(script_ref.HasRedeemScript());
+  EXPECT_FALSE(script_ref.HasScriptTree());
+  EXPECT_FALSE(script_ref.HasTapBranch());
+  EXPECT_NO_THROW(locking_script = desc.GetLockingScript());
+  EXPECT_NO_THROW(desc_str = desc.ToString(false));
+  EXPECT_EQ(AddressType::kP2shP2wpkhAddress, script_ref.GetAddressType());
+  EXPECT_EQ(HashType::kP2sh, script_ref.GetHashType());
+  EXPECT_EQ(script_ref.GenerateAddress(nettype).GetAddress(),
+      "2Mww8dCYPUpKHofjgcXcBCEGmniw9CoaiD2");
+  EXPECT_NO_THROW(redeem_script = script_ref.GetRedeemScript());
+  EXPECT_EQ(desc_str, descriptor1);
+  EXPECT_EQ(locking_script.ToString(),
+      "OP_HASH160 336caa13e08b96080a32b5d818d59b4ab3b36742 OP_EQUAL");
+  EXPECT_EQ(redeem_script.GetHex(), "001438971f73930f6c141d977ac4fd4a727c854935b3");
+
+  child_script_ref = script_ref.GetChild();
+  EXPECT_TRUE(child_script_ref.HasKey());
+  EXPECT_EQ(1, child_script_ref.GetKeyNum());
+  EXPECT_NO_THROW(locking_script = child_script_ref.GetLockingScript());
+  EXPECT_EQ(AddressType::kP2wpkhAddress, child_script_ref.GetAddressType());
+  EXPECT_EQ(HashType::kP2wpkh, child_script_ref.GetHashType());
+  EXPECT_EQ(child_script_ref.GenerateAddress(nettype).GetAddress(),
+      "tb1q8zt37uunpakpg8vh0tz06jnj0jz5jddn5mlts3");
+  EXPECT_NO_THROW(pubkey = child_script_ref.GetKeyList()[0].GetPubkey());
+  EXPECT_EQ(locking_script.ToString(),
+      "0 38971f73930f6c141d977ac4fd4a727c854935b3");
+  EXPECT_EQ(pubkey.GetHex(), pubkey_hex);
+
+  // invalid check
+  try {
+    desc = Descriptor::Parse("pkh(" + ypub + "/0/0)");
+    EXPECT_STREQ("", "error not occurred.");
+    return;
+  } catch (const CfdException& except) {
+    EXPECT_STREQ(except.what(), "invalid bip32 format. pkh is not using bip49 or bip84.");
+  }
+  try {
+    desc = Descriptor::Parse("pk(" + ypub + "/0/0)");
+    EXPECT_STREQ("", "error not occurred.");
+    return;
+  } catch (const CfdException& except) {
+    EXPECT_STREQ(except.what(), "invalid bip32 format. pk is not using bip49 or bip84.");
+  }
+  try {
+    desc = Descriptor::Parse("wpkh(" + ypub + "/0/0)");
+    EXPECT_STREQ("", "error not occurred.");
+    return;
+  } catch (const CfdException& except) {
+    EXPECT_STREQ(except.what(), "invalid bip32 format. bip49 is using sh-wpkh only.");
+  }
+}
+
+TEST(Descriptor, Parse_bip84) {
+  std::string pubkey_hex = "0330d54fd0dd420a6e5f8d3624f5f3482cae350f79d5f0753bf5beef9c2d91af3c";
+  std::string zpub = "zpub6rFR7y4Q2AijBEqTUquhVz398htDFrtymD9xYYfG1m4wAcvPhXNfE3EfH1r1ADqtfSdVCToUG868RvUUkgDKf31mGDtKsAYz2oz2AGutZYs";
+  std::string descriptor1 = "wpkh(" + zpub + "/0/0)";
+  Descriptor desc;
+  Script locking_script;
+  std::string desc_str = "";
+  DescriptorScriptReference script_ref;
+  Pubkey pubkey;
+  NetType nettype = NetType::kMainnet;
+
+  try {
+    desc = Descriptor::Parse(descriptor1);
+  } catch (const CfdException& except) {
+    EXPECT_STREQ(except.what(), "");
+    return;
+  }
+
+  EXPECT_NO_THROW(script_ref = desc.GetReference());
+  EXPECT_TRUE(script_ref.HasKey());
+  EXPECT_TRUE(script_ref.HasAddress());
+  EXPECT_EQ(1, script_ref.GetKeyNum());
+  EXPECT_FALSE(script_ref.HasChild());
+  EXPECT_FALSE(script_ref.HasReqNum());
+  EXPECT_FALSE(script_ref.HasRedeemScript());
+  EXPECT_FALSE(script_ref.HasScriptTree());
+  EXPECT_FALSE(script_ref.HasTapBranch());
+  EXPECT_NO_THROW(locking_script = desc.GetLockingScript());
+  EXPECT_NO_THROW(desc_str = desc.ToString(false));
+  EXPECT_EQ(AddressType::kP2wpkhAddress, script_ref.GetAddressType());
+  EXPECT_EQ(HashType::kP2wpkh, script_ref.GetHashType());
+  EXPECT_EQ(script_ref.GenerateAddress(nettype).GetAddress(),
+      "bc1qcr8te4kr609gcawutmrza0j4xv80jy8z306fyu");
+  EXPECT_NO_THROW(pubkey = script_ref.GetKeyList()[0].GetPubkey());
+  EXPECT_EQ(desc_str, descriptor1);
+  EXPECT_EQ(locking_script.ToString(),
+      "0 c0cebcd6c3d3ca8c75dc5ec62ebe55330ef910e2");
+  EXPECT_EQ(pubkey.GetHex(), pubkey_hex);
+
+  // invalid check
+  try {
+    desc = Descriptor::Parse("pkh(" + zpub + "/0/0)");
+    EXPECT_STREQ("", "error not occurred.");
+    return;
+  } catch (const CfdException& except) {
+    EXPECT_STREQ(except.what(), "invalid bip32 format. pkh is not using bip49 or bip84.");
+  }
+  try {
+    desc = Descriptor::Parse("pk(" + zpub + "/0/0)");
+    EXPECT_STREQ("", "error not occurred.");
+    return;
+  } catch (const CfdException& except) {
+    EXPECT_STREQ(except.what(), "invalid bip32 format. pk is not using bip49 or bip84.");
+  }
+  try {
+    desc = Descriptor::Parse("sh(wpkh(" + zpub + "/0/0))");
+    EXPECT_STREQ("", "error not occurred.");
+    return;
+  } catch (const CfdException& except) {
+    EXPECT_STREQ(except.what(), "invalid bip32 format. bip84 is using wpkh only.");
+  }
 }
 
 TEST(DescriptorKeyInfo, Constructor_Privkey_Testnet_Compress) {

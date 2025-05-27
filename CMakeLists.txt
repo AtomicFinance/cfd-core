@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.13)
+cmake_minimum_required(VERSION 3.15)
 
 # configure.ac: AC_INIT([cfd-core], [1.0]
 set(PACKAGE_VERSION   1.0.0)
@@ -19,7 +19,7 @@ include(./cmake/CfdCommonSetting.cmake)
 ####################
 # test
 ####################
-project(cfdcore_all_test CXX)
+project(cfdcore_project CXX)
 if(ENABLE_TESTS)
 enable_testing()
 endif()		# ENABLE_TESTS

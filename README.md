@@ -133,7 +133,7 @@ cmake --build build
 - `-DTARGET_RPATH=xxxxx;yyyyy`: Set rpath (Linux, MacOS). Separator is ';'.
 - `-DCMAKE_BUILD_TYPE=Release`: Enable release build.
 - `-DCMAKE_BUILD_TYPE=Debug`: Enable debug build.
-- `-DSTD_CPP_VERSION=xx`: Set the C++ version. [11,14,17,20] (default:11)
+- `-DSTD_CPP_VERSION=xx`: Set the C++ version. [11,14,17,20] (default:14)
 - `-DCFDCORE_DEBUG=on`: Enable cfd debug mode and loggings log files. [ON/OFF] (default:OFF)
   - Enable debug mode is need `STD_CPP_VERSION` upper 14.
 - `-DCFDCORE_LOG_LEVEL=xxxx`: Set log level. [trace/debug/info/warn] (default:info)
@@ -240,6 +240,32 @@ npm run ctest
   - Collecting coverage only on Linux.
     - It is generated unnecessary constructors and destructors on MacOS. So it is not suitable for collecting function coverage.
     - It may be possible to run it on windows, but I have not tried it.
+
+### using IDE
+
+#### use Visual Studio
+
+cmake example:
+
+```bat
+cmake -S . -B build -G "Visual Studio 16 2019" -DENABLE_SHARED=on -DENABLE_TESTS=on -DENABLE_ELEMENTS=on -DCMAKE_BUILD_TYPE=Debug -DTARGET_RPATH=./build/Debug
+
+cmake --build build --config Debug --parallel 4
+
+(open build/cfdcore_project.sln)
+```
+
+#### use Xcode
+
+cmake example:
+
+```shell
+cmake -S . -B build -G "Xcode" -T buildsystem=1 -DENABLE_SHARED=off -DENABLE_TESTS=on -DENABLE_ELEMENTS=on -DCMAKE_BUILD_TYPE=Debug -DTARGET_RPATH=./build/Debug
+
+cmake --build build --config Debug --parallel 4
+
+(open build/cfdcore_project.xcodeproj)
+```
 
 ---
 

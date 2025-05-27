@@ -23,6 +23,18 @@
 namespace cfd {
 namespace core {
 
+//! OP_CODESEPARATOR default position
+constexpr const uint32_t kDefaultCodeSeparatorPosition = 0xffffffff;
+
+/**
+ * @brief Tapscript data struct.
+ */
+struct TapScriptData {
+  ByteData256 tap_leaf_hash;  //!< tapleaf hash
+  //! OP_CODESEPARATOR position
+  uint32_t code_separator_position = kDefaultCodeSeparatorPosition;
+};
+
 /**
  * @brief Hash type definition
  */
@@ -129,6 +141,13 @@ class CFD_CORE_EXPORT OutPoint {
    * @retval false
    */
   bool IsValid() const;
+
+  /**
+   * @brief Determine coinbase by txid / vout.
+   * @retval true  coinbase
+   * @retval false other
+   */
+  bool IsCoinBase() const;
 
   /**
    * @brief Equals operator.
@@ -719,14 +738,15 @@ class CFD_CORE_EXPORT SignatureUtil {
  public:
   /**
    * @brief Calculate the signature from the private key using elliptic curve cryptography.
-   * @param[in] signature_hash  signature hash
-   * @param[in] private_key     private key
-   * @param[in] has_grind_r     EC_FLAG_GRIND_R flag
+   * @param[in] signature_hash    signature hash
+   * @param[in] private_key       private key
+   * @param[in] has_grind_r       EC_FLAG_GRIND_R flag
+   * @param[in] has_recoverable   EC_FLAG_RECOVERABLE flag
    * @return signature
    */
   static ByteData CalculateEcSignature(
       const ByteData256& signature_hash, const Privkey& private_key,
-      bool has_grind_r = true);
+      bool has_grind_r = true, bool has_recoverable = false);
 
   /**
    * @brief Verify if a signature with respect to a public key and a message.

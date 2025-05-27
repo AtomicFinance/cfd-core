@@ -330,6 +330,13 @@ void ConfidentialNonce::CheckVersion(uint8_t version) {
 
 ByteData ConfidentialNonce::GetData() const { return data_; }
 
+ByteData ConfidentialNonce::GetSerializeData() const {
+  if (version_ == 0) {
+    return ByteData(0);
+  }
+  return data_;
+}
+
 std::string ConfidentialNonce::GetHex() const { return data_.GetHex(); }
 
 bool ConfidentialNonce::HasBlinding() const {
@@ -448,6 +455,13 @@ ByteData ConfidentialAssetId::GetData() const {
     std::copy(data.begin(), data.end(), std::back_inserter(byte_data));
   }
   return ByteData(byte_data);
+}
+
+ByteData ConfidentialAssetId::GetSerializeData() const {
+  if (version_ == 0) {
+    return ByteData(0);
+  }
+  return GetData();
 }
 
 std::string ConfidentialAssetId::GetHex() const {
@@ -598,6 +612,13 @@ void ConfidentialValue::CheckVersion(uint8_t version) {
 }
 
 ByteData ConfidentialValue::GetData() const { return data_; }
+
+ByteData ConfidentialValue::GetSerializeData() const {
+  if (version_ == 0) {
+    return ByteData(0);
+  }
+  return data_;
+}
 
 std::string ConfidentialValue::GetHex() const { return data_.GetHex(); }
 
@@ -836,6 +857,17 @@ ByteData256 ConfidentialTxIn::GetWitnessHash() const {
   }
   ByteData256 result = CryptoUtil::ComputeFastMerkleRoot(leaves);
   return result;
+}
+
+uint8_t ConfidentialTxIn::GetOutPointFlag() const {
+  uint32_t flag = 0;
+  if (!issuance_amount_.IsEmpty()) {
+    flag |= static_cast<uint32_t>(WALLY_TX_ISSUANCE_FLAG);
+  }
+  if (!pegin_witness_.IsEmpty()) {
+    flag |= static_cast<uint32_t>(WALLY_TX_PEGIN_FLAG);
+  }
+  return static_cast<uint8_t>(flag >> 24);
 }
 
 uint32_t ConfidentialTxIn::EstimateTxInSize(
@@ -1137,6 +1169,7 @@ ConfidentialTxOut ConfidentialTxOut::CreateDestroyAmountTxOut(
 const RangeProofInfo ConfidentialTxOut::DecodeRangeProofInfo(
     const ByteData &range_proof) {
   RangeProofInfo range_proof_info;
+  memset(&range_proof_info, 0, sizeof(range_proof_info));
   WallyUtil::RangeProofInfo(
       range_proof, &range_proof_info.exponent, &range_proof_info.mantissa,
       &range_proof_info.min_value, &range_proof_info.max_value);
@@ -1312,7 +1345,11 @@ void ConfidentialTransaction::SetFromHex(const std::string &hex_string) {
           txin_item->txhash, txin_item->txhash + sizeof(txin_item->txhash));
       std::vector<uint8_t> script_buf(
           txin_item->script, txin_item->script + txin_item->script_len);
-      Script unlocking_script = Script(ByteData(script_buf));
+      Txid txid = Txid(ByteData256(txid_buf));
+      OutPoint out_point(txid, txin_item->index);
+      // TODO(k-matsuzawa): ignore size checks for coinbase scripts
+      Script unlocking_script =
+          Script(ByteData(script_buf), out_point.IsCoinBase());
       /* Temporarily comment out
       if (!unlocking_script.IsPushOnly()) {
         warn(CFD_LOG_SOURCE, "IsPushOnly() false.");
@@ -1327,7 +1364,7 @@ void ConfidentialTransaction::SetFromHex(const std::string &hex_string) {
       std::vector<uint8_t> entropy(
           txin_item->entropy, txin_item->entropy + sizeof(txin_item->entropy));
       ConfidentialTxIn txin(
-          Txid(ByteData256(txid_buf)), txin_item->index, txin_item->sequence,
+          txid, txin_item->index, txin_item->sequence,
           unlocking_script, ScriptWitness(), ByteData256(blinding_buf),
           ByteData256(entropy),
           ConfidentialValue(ConvertToByteData(
@@ -3098,6 +3135,186 @@ ByteData256 ConfidentialTransaction::GetElementsSignatureHash(
   return ByteData256(buffer);
 }
 
+ByteData256 ConfidentialTransaction::GetElementsSchnorrSignatureHash(
+    uint32_t txin_index, SigHashType sighash_type,
+    const BlockHash &genesis_block_hash,
+    const std::vector<ConfidentialTxOut> &utxo_list,
+    const TapScriptData *script_data, const ByteData &annex) const {
+  CheckTxInIndex(txin_index, __LINE__, __FUNCTION__);
+  if (this->vin_.size() > utxo_list.size()) {
+    warn(CFD_LOG_SOURCE, "not enough utxo list.");
+    throw CfdException(kCfdIllegalArgumentError, "not enough utxo list.");
+  }
+  if ((!annex.IsEmpty()) && (annex.GetHeadData() != TaprootUtil::kAnnexTag)) {
+    warn(CFD_LOG_SOURCE, "invalid annex tag.");
+    throw CfdException(kCfdIllegalArgumentError, "invalid annex tag");
+  }
+
+  const Script locking_script = utxo_list[txin_index].GetLockingScript();
+  if (!locking_script.IsWitnessProgram()) {
+    warn(CFD_LOG_SOURCE, "target vin is not segwit.");
+    throw CfdException(kCfdIllegalArgumentError, "target vin is not segwit.");
+  } else if (locking_script.GetWitnessVersion() != WitnessVersion::kVersion1) {
+    warn(CFD_LOG_SOURCE, "target vin is not segwit v1.");
+    throw CfdException(
+        kCfdIllegalArgumentError, "target vin is not segwit v1.");
+  }
+
+  uint8_t sighash_type_value =
+      static_cast<uint8_t>(sighash_type.GetSigHashFlag());
+  bool is_anyone_can_pay = sighash_type.IsAnyoneCanPay();
+  if (sighash_type.IsRangeproof()) {
+    // Since segwit v1's sighash calculation includes a sighash rangeproof equivalent, there is no need to specify a sighash rangeproof. // NOLINT
+    warn(CFD_LOG_SOURCE, "sighash rangeproof not support on segwit v1.");
+    throw CfdException(
+        kCfdIllegalArgumentError,
+        "sighash rangeproof not support on segwit v1.");
+  } else if (!SchnorrSignature::IsValidSigHashType(sighash_type_value)) {
+    warn(CFD_LOG_SOURCE, "Invalid sighash type on segwit v1.");
+    throw CfdException(
+        kCfdIllegalArgumentError, "Invalid sighash type on segwit v1.");
+  } else if (sighash_type_value == 0) {
+    sighash_type_value = 0x01;  // SIGHASH_ALL
+  }
+  bool has_sighash_all = ((sighash_type_value & 0x0f) == 1) ? true : false;
+
+  uint8_t ext_flag = 0;  // 0 - 127
+  uint8_t has_tap_script = 0;
+  uint8_t key_version = 0;
+  if ((script_data != nullptr) && (!script_data->tap_leaf_hash.IsEmpty())) {
+    has_tap_script = 1;
+  }
+  ext_flag |= has_tap_script;
+
+  Serializer builder;
+  auto top = HashUtil::Sha256("TapSighash/elements");
+  builder.AddDirectBytes(top);
+  builder.AddDirectBytes(top);  // double data
+  builder.AddDirectBytes(genesis_block_hash.GetData());
+  builder.AddDirectBytes(genesis_block_hash.GetData());  // double data
+  builder.AddDirectByte(static_cast<uint8_t>(sighash_type.GetSigHashFlag()));
+  builder.AddDirectNumber(static_cast<uint32_t>(GetVersion()));
+  builder.AddDirectNumber(GetLockTime());
+  if (!is_anyone_can_pay) {
+    Serializer outpoint_flags_buf;
+    Serializer prevouts_buf;
+    Serializer spent_buf;
+    Serializer scripts_buf;
+    Serializer sequences_buf;
+    Serializer issuance_buf;
+    Serializer issuance_rangeproof_buf;
+    for (size_t index = 0; index < vin_.size(); ++index) {
+      outpoint_flags_buf.AddDirectByte(vin_[index].GetOutPointFlag());
+      prevouts_buf.AddDirectBytes(vin_[index].GetTxid().GetData());
+      prevouts_buf.AddDirectNumber(vin_[index].GetVout());
+      spent_buf.AddDirectBytes(utxo_list[index].GetAsset().GetData());
+      spent_buf.AddDirectBytes(
+          utxo_list[index].GetConfidentialValue().GetSerializeData());
+      scripts_buf.AddVariableBuffer(
+          utxo_list[index].GetLockingScript().GetData());
+      sequences_buf.AddDirectNumber(vin_[index].GetSequence());
+
+      if (vin_[index].GetIssuanceAmount().IsEmpty()) {
+        issuance_buf.AddDirectByte(0);
+      } else {
+        issuance_buf.AddDirectBytes(vin_[index].GetBlindingNonce());
+        issuance_buf.AddDirectBytes(vin_[index].GetAssetEntropy());
+        issuance_buf.AddDirectBytes(
+            vin_[index].GetIssuanceAmount().GetSerializeData());
+        issuance_buf.AddDirectBytes(
+            vin_[index].GetInflationKeys().GetSerializeData());
+      }
+      issuance_rangeproof_buf.AddVariableBuffer(
+          vin_[index].GetIssuanceAmountRangeproof());
+      issuance_rangeproof_buf.AddVariableBuffer(
+          vin_[index].GetInflationKeysRangeproof());
+    }
+    builder.AddDirectBytes(HashUtil::Sha256(outpoint_flags_buf.Output()));
+    builder.AddDirectBytes(HashUtil::Sha256(prevouts_buf.Output()));
+    builder.AddDirectBytes(HashUtil::Sha256(spent_buf.Output()));
+    builder.AddDirectBytes(HashUtil::Sha256(scripts_buf.Output()));
+    builder.AddDirectBytes(HashUtil::Sha256(sequences_buf.Output()));
+    builder.AddDirectBytes(HashUtil::Sha256(issuance_buf.Output()));
+    builder.AddDirectBytes(HashUtil::Sha256(issuance_rangeproof_buf.Output()));
+  }
+  if (has_sighash_all) {
+    Serializer outputs_buf;
+    Serializer rangeproof_buf;
+    for (const auto &txout : vout_) {
+      outputs_buf.AddDirectBytes(txout.GetAsset().GetData());
+      outputs_buf.AddDirectBytes(
+          txout.GetConfidentialValue().GetSerializeData());
+      outputs_buf.AddDirectBytes(txout.GetNonce().GetSerializeData());
+      outputs_buf.AddVariableBuffer(txout.GetLockingScript().GetData());
+      rangeproof_buf.AddVariableBuffer(txout.GetSurjectionProof());
+      rangeproof_buf.AddVariableBuffer(txout.GetRangeProof());
+    }
+    builder.AddDirectBytes(HashUtil::Sha256(outputs_buf.Output()));
+    builder.AddDirectBytes(HashUtil::Sha256(rangeproof_buf.Output()));
+  }
+
+  uint8_t spend_type = (ext_flag << 1) + (annex.IsEmpty() ? 0 : 1);
+  builder.AddDirectByte(spend_type);
+  if (is_anyone_can_pay) {
+    builder.AddDirectByte(vin_[txin_index].GetOutPointFlag());
+    builder.AddDirectBytes(vin_[txin_index].GetTxid().GetData());
+    builder.AddDirectNumber(vin_[txin_index].GetVout());
+    builder.AddDirectBytes(utxo_list[txin_index].GetAsset().GetData());
+    builder.AddDirectBytes(
+        utxo_list[txin_index].GetConfidentialValue().GetSerializeData());
+    builder.AddVariableBuffer(
+        utxo_list[txin_index].GetLockingScript().GetData());
+    builder.AddDirectNumber(vin_[txin_index].GetSequence());
+
+    if (vin_[txin_index].GetIssuanceAmount().IsEmpty()) {
+      builder.AddDirectByte(0);
+    } else {
+      builder.AddDirectBytes(vin_[txin_index].GetBlindingNonce());
+      builder.AddDirectBytes(vin_[txin_index].GetAssetEntropy());
+      builder.AddDirectBytes(
+          vin_[txin_index].GetIssuanceAmount().GetSerializeData());
+      builder.AddDirectBytes(
+          vin_[txin_index].GetInflationKeys().GetSerializeData());
+      // issuance rangeproof
+      Serializer rangeproof_buf;
+      rangeproof_buf.AddVariableBuffer(
+          vin_[txin_index].GetIssuanceAmountRangeproof());
+      rangeproof_buf.AddVariableBuffer(
+          vin_[txin_index].GetInflationKeysRangeproof());
+      builder.AddDirectBytes(HashUtil::Sha256(rangeproof_buf.Output()));
+    }
+  } else {
+    builder.AddDirectNumber(txin_index);
+  }
+
+  if (!annex.IsEmpty()) builder.AddDirectBytes(HashUtil::Sha256(annex));
+
+  if (sighash_type.GetSigHashAlgorithm() == SigHashAlgorithm::kSigHashSingle) {
+    CheckTxOutIndex(txin_index, __LINE__, __FUNCTION__);
+    Serializer outputs_buf;
+    outputs_buf.AddDirectBytes(vout_[txin_index].GetAsset().GetData());
+    outputs_buf.AddDirectBytes(
+        vout_[txin_index].GetConfidentialValue().GetSerializeData());
+    outputs_buf.AddDirectBytes(
+        vout_[txin_index].GetNonce().GetSerializeData());
+    outputs_buf.AddVariableBuffer(
+        vout_[txin_index].GetLockingScript().GetData());
+    builder.AddDirectBytes(HashUtil::Sha256(outputs_buf.Output()));
+
+    Serializer rangeproof_buf;
+    rangeproof_buf.AddVariableBuffer(vout_[txin_index].GetSurjectionProof());
+    rangeproof_buf.AddVariableBuffer(vout_[txin_index].GetRangeProof());
+    builder.AddDirectBytes(HashUtil::Sha256(rangeproof_buf.Output()));
+  }
+
+  if (has_tap_script == 1) {
+    builder.AddDirectBytes(script_data->tap_leaf_hash.GetData());
+    builder.AddDirectByte(key_version);
+    builder.AddDirectNumber(script_data->code_separator_position);
+  }
+  return HashUtil::Sha256(builder.Output());
+}
+
 void ConfidentialTransaction::RandomSortTxOut() {
   const std::vector<ConfidentialTxOutReference> &txout_list = GetTxOutList();
   // blind check
@@ -3179,10 +3396,10 @@ PegoutKeyData ConfidentialTransaction::GetPegoutPubkeyData(
   }
 
   ByteData prefix = pubkey_prefix;
-  if ((net_type == NetType::kTestnet) || ((net_type == NetType::kRegtest))) {
-    prefix = ByteData("043587cf");
-  } else if (net_type == NetType::kMainnet) {
-    prefix = ByteData("0488b21e");
+  if (pubkey_prefix.IsEmpty() &&
+      ((net_type == NetType::kTestnet) || (net_type == NetType::kRegtest) ||
+       (net_type == NetType::kMainnet))) {
+    // do nothing
   } else if (prefix.GetDataSize() != 4) {
     throw CfdException(
         kCfdIllegalArgumentError, "Illegal prefix and nettype.");
@@ -3191,8 +3408,8 @@ PegoutKeyData ConfidentialTransaction::GetPegoutPubkeyData(
   // check descriptor
   ExtPubkey xpub;
   ExtPubkey child_xpub = GenerateExtPubkeyFromDescriptor(
-      bitcoin_descriptor, bip32_counter, prefix, net_type, elements_net_type,
-      &xpub, descriptor_derive_address);
+      bitcoin_descriptor, bip32_counter, pubkey_prefix, net_type,
+      elements_net_type, &xpub, descriptor_derive_address);
   // FlatSigningProvider provider;
   // const auto descriptor = Parse(desc_str, provider);
   // if (!descriptor) desc_str = "pkh(" + xpub.GetBase58String() + "/0/*)";
@@ -3238,13 +3455,11 @@ PegoutKeyData ConfidentialTransaction::GetPegoutPubkeyData(
 Address ConfidentialTransaction::GetPegoutAddressFromDescriptor(
     const std::string &bitcoin_descriptor, uint32_t bip32_counter,
     NetType net_type, NetType elements_net_type) {
-  auto prefix = (net_type == NetType::kMainnet) ? ByteData("0488b21e")
-                                                : ByteData("043587cf");
   ExtPubkey base_ext_pubkey;
   Address result;
   GenerateExtPubkeyFromDescriptor(
-      bitcoin_descriptor, bip32_counter, prefix, net_type, elements_net_type,
-      &base_ext_pubkey, &result);
+      bitcoin_descriptor, bip32_counter, ByteData(), net_type,
+      elements_net_type, &base_ext_pubkey, &result);
   return result;
 }
 
@@ -3252,6 +3467,19 @@ ExtPubkey ConfidentialTransaction::GenerateExtPubkeyFromDescriptor(
     const std::string &bitcoin_descriptor, uint32_t bip32_counter,
     const ByteData &prefix, NetType net_type, NetType elements_net_type,
     ExtPubkey *base_ext_pubkey, Address *descriptor_derive_address) {
+  bool is_mainnet = false;
+  switch (net_type) {
+    case NetType::kMainnet:
+      is_mainnet = true;
+      break;
+    case NetType::kTestnet:
+      // fall-through
+    case NetType::kRegtest:
+      break;
+    default:
+      throw CfdException(
+          kCfdIllegalArgumentError, "Illegal bitcoin network type error.");
+  }
   switch (elements_net_type) {
     case NetType::kMainnet:
     case NetType::kTestnet:
@@ -3271,8 +3499,20 @@ ExtPubkey ConfidentialTransaction::GenerateExtPubkeyFromDescriptor(
   try {
     // check extkey (not output descriptor)
     ExtPubkey check_key(bitcoin_descriptor);
-    if (check_key.GetVersionData().Equals(prefix)) {
+    bool is_mainnet_key = check_key.GetNetworkType() == kMainnet;
+    if ((!prefix.IsEmpty()) && check_key.GetVersionData().Equals(prefix)) {
       desc_str = "pkh(" + bitcoin_descriptor + ")";  // create pkh descriptor
+    } else if (is_mainnet == is_mainnet_key) {
+      switch (check_key.GetFormatType()) {
+        case kBip49:
+          desc_str = "sh(wpkh(" + bitcoin_descriptor + "))";
+          break;
+        case kBip84:
+          desc_str = "wpkh(" + bitcoin_descriptor + ")";
+          break;
+        default:
+          desc_str = "pkh(" + bitcoin_descriptor + ")";
+      }
     }
   } catch (const CfdException &except) {
     info(
@@ -3312,7 +3552,7 @@ ExtPubkey ConfidentialTransaction::GenerateExtPubkeyFromDescriptor(
         kCfdIllegalArgumentError, "BitcoinDescriptor invalid extkey format.");
   }
   *base_ext_pubkey = key_ref.GetExtPubkey();
-  if (!base_ext_pubkey->GetVersionData().Equals(prefix)) {
+  if (!prefix.IsEmpty() && !base_ext_pubkey->GetVersionData().Equals(prefix)) {
     warn(
         CFD_LOG_SOURCE, "bitcoin_descriptor illegal prefix[{}].",
         xpub.GetVersionData().GetHex());
@@ -3405,19 +3645,16 @@ uint8_t *ConfidentialTransaction::CopyConfidentialCommitment(
     ++result;
   } else {
     size_t max_size = kConfidentialDataSize;
-    if (buffer_addr[0] == kConfidentialVersion_1) {
+    if ((buffer_addr[0] == kConfidentialVersion_1) &&
+        (max_size > explicit_size)) {
       max_size = explicit_size;
     }
-    size_t copy_size = max_size;
-    if (buffer_size <= copy_size) {
-      copy_size = buffer_size;
-    }
+    memset(address, 0, max_size);
+
+    size_t copy_size = (buffer_size < max_size) ? buffer_size : max_size;
     // explicit value
     // confidential value
-    uint8_t ct_buffer[kConfidentialDataSize];
-    memset(ct_buffer, 0, sizeof(ct_buffer));
-    memcpy(ct_buffer, buffer_addr, copy_size);
-    memcpy(address, ct_buffer, max_size);
+    memcpy(address, buffer_addr, copy_size);
     result += max_size;
   }
   return result;

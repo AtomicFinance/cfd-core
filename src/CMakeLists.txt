@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.13)
+cmake_minimum_required(VERSION 3.15)
 
 # 絶対パス->相対パス変換
 cmake_policy(SET CMP0076 NEW)
@@ -104,6 +104,7 @@ target_sources(${PROJECT_NAME}
   PRIVATE
     ${CFDCORE_SOURCES}
     ${FMT_SOURCES}
+    ${CFDCORE_PKGINCLUDE_FILES}
 )
 else()
 target_sources(${PROJECT_NAME}
@@ -111,6 +112,7 @@ target_sources(${PROJECT_NAME}
     ${CFDCORE_SOURCES}
     ${FMT_SOURCES}
     ${QUILL_SOURCES}
+    ${CFDCORE_PKGINCLUDE_FILES}
 )
 endif()
 
