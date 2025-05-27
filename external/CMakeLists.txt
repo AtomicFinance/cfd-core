@@ -156,6 +156,23 @@ set(INSTALL_GTEST OFF CACHE BOOL "" FORCE)
 
 add_subdirectory(${CMAKE_SOURCE_DIR}/external/${TEMPLATE_PROJECT_NAME}
                  ${CFD_ROOT_BINARY_DIR}/${TEMPLATE_PROJECT_NAME}/build)
+
+# Disable specific warnings for GoogleTest that cause issues with newer GCC versions
+if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+  if(TARGET gtest)
+    target_compile_options(gtest PRIVATE -Wno-maybe-uninitialized)
+  endif()
+  if(TARGET gtest_main)
+    target_compile_options(gtest_main PRIVATE -Wno-maybe-uninitialized)
+  endif()
+  if(TARGET gmock)
+    target_compile_options(gmock PRIVATE -Wno-maybe-uninitialized)
+  endif()
+  if(TARGET gmock_main)
+    target_compile_options(gmock_main PRIVATE -Wno-maybe-uninitialized)
+  endif()
+endif()
+
 set_property(GLOBAL PROPERTY ${TEMPLATE_PROJECT_NAME} 1)
 endif()
 endif() # MSVC OR ENABLE_TESTS
