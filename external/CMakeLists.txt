@@ -61,7 +61,7 @@ if(LIBWALLY_TARGET_URL)
 set(LIBWALLY_TARGET_REP  ${LIBWALLY_TARGET_URL})
 message(STATUS "[external project local] libwally-core url=${LIBWALLY_TARGET_URL}")
 else()
-set(LIBWALLY_TARGET_REP  cryptogarageinc/libwally-core.git)
+set(LIBWALLY_TARGET_REP  atomicfinance/libwally-core.git)
 endif()
 
 if(${USE_GIT_SSH})
