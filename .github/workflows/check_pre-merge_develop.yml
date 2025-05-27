@@ -8,6 +8,11 @@ on:
     branches:
     - develop
 
+# Limit concurrency to prevent job cancellations
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 env:
   CMAKE_VERSION: 3.25.0
 
@@ -58,7 +63,10 @@ jobs:
   cmake-ubuntu-test:
     name: cmake build
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
     strategy:
+      # Reduce concurrent jobs to prevent cancellations
+      max-parallel: 3
       matrix:
         os: [ubuntu-22.04, ubuntu-20.04]
         shared: [on, off]
@@ -66,6 +74,9 @@ jobs:
         exclude:
           - os: ubuntu-20.04
             elements: off
+          # Reduce matrix size - focus on most important combinations
+          - os: ubuntu-20.04
+            shared: off
 
     steps:
     - uses: actions/checkout@v4

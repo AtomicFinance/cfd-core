@@ -8,6 +8,11 @@ on:
     branches:
     - features/sprint*
 
+# Limit concurrency to prevent job cancellations
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 env:
   CMAKE_VERSION: 3.25.0
 
@@ -56,7 +61,10 @@ jobs:
   cmake-ubuntu-coverage:
     name: cmake build-ubuntu
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
     strategy:
+      # Reduce concurrent jobs to prevent cancellations
+      max-parallel: 2
       matrix:
         os: [ubuntu-22.04, ubuntu-20.04]
         shared: [on]
